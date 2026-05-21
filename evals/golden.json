@@ -1,0 +1,57 @@
+{
+  "_about": "Ground truth for the Always-On Ops Agent eval harness. Derived by hand from contracts/, compliance-policy.md, deploys/recent.json and runbooks/ -- NOT copied from the agent's own output. See evals/README.md for the reasoning behind each verdict.",
+  "triage": {
+    "PROD-4521": {
+      "is_incident": true,
+      "expected_severity": "P0",
+      "expected_correlation_confidence": "confirmed",
+      "classification_keywords": ["nullpointerexception", "payment", "checkout", "guest-checkout", "PaymentService.java:142"],
+      "_why": "NPE at PaymentService.java:142 is the known guest-checkout bug in the runbook; payment-service v4.8.2 ('Add guest checkout support') deployed 14:04:11Z, issue opened 14:18:23Z (~14 min later). All customers / multiple regions -> P0. Direct stack-trace + deploy match -> confirmed."
+    },
+    "PROD-4487": {
+      "is_incident": true,
+      "expected_severity": "P1",
+      "expected_correlation_confidence": "suspected",
+      "classification_keywords": ["acme", "tenant", "checkout", "guest-checkout", "feature flag"],
+      "_why": "Single tenant (Acme, 2400 seats) -> P1. tenant-config-service v3.2.1 flipped 'guest-checkout' flag for cohort B (Acme) at 07:12:08Z, issue opened 07:33:09Z. No stack trace, so root cause is inferred from timing+tenant scope -> suspected."
+    },
+    "PROD-4519": {
+      "is_incident": true,
+      "expected_severity": "P2",
+      "expected_correlation_confidence": "suspected",
+      "classification_keywords": ["upload", "latency", "signing-service", "url_ttl", "cdn"],
+      "_why": "Slow image uploads, no errors. signing-service v2.1.4 ('Reduce URL TTL') deployed 2026-05-17T11:22Z; issue opened 2026-05-18T09:42Z. Runbook ties this to the signed-URL TTL bug but expects correlation 'within 6 hours' of the deploy -- here it's ~22h, so timing is fuzzy -> suspected. Multi-platform but degraded (not down) -> P2."
+    },
+    "PROD-4498": {
+      "is_incident": true,
+      "expected_severity": "P2",
+      "expected_correlation_confidence": "none",
+      "classification_keywords": ["502", "login", "connection pool", "auth", "exhaustion"],
+      "_why": "Connection-pool exhaustion on auth-service per runbook. The only auth-service deploy (v6.0.0) is 2026-05-14T08:15Z -- AFTER the issue opened 2026-05-12T22:14Z -- so it cannot be the cause -> correlation none. Intermittent, self-resolving 502 windows -> P2."
+    },
+    "PROD-4506": {
+      "is_incident": false,
+      "expected_severity": null,
+      "expected_correlation_confidence": "none",
+      "classification_keywords": ["feature request", "parallel batch", "worker pool", "max_concurrency", "backlog"],
+      "_why": "Planned feature work ('Add support for parallel batch jobs'), not a production problem. No severity, must NOT be paged."
+    }
+  },
+  "compliance": {
+    "acme-data-platform": {
+      "clean": false,
+      "expected_violations": ["data_residency", "subprocessors", "breach_notification"],
+      "_why": "data_residency: SS2 allows US/Ireland/Singapore processing, 'does not guarantee residency' for EU data. subprocessors: SS6 only updates the list within 30 days AFTER a change, not >=30 days notice BEFORE adding. breach_notification: SS7 is 96h > 72h policy. COMPLIANT on audit (60d), termination (90d for-convenience), liability (12mo + breach carve-out), governing_law (California)."
+    },
+    "globex-messaging": {
+      "clean": true,
+      "expected_violations": [],
+      "_why": "Clean. data_residency: SS2 'exclusively within the EEA'. audit: SS3 30 days. termination: SS4 60 days for convenience. liability: SS5 12 months, breach excluded from cap. subprocessors: SS6 >=30 days notice before engaging. breach_notification: SS6/7 24 hours. governing_law: SS8 England and Wales."
+    },
+    "sirius-storage": {
+      "clean": false,
+      "expected_violations": ["data_residency", "audit_rights", "termination", "liability_cap", "subprocessors", "breach_notification", "governing_law"],
+      "_why": "Violates all 7. data_residency: SS2 Malaysia/Singapore only. audit_rights: SS3 180 days notice (>90). termination: SS4 for-convenience excluded during 5-yr initial term. liability_cap: SS5 3 months (<12). subprocessors: SS6 'without prior notice'. breach_notification: SS7 'in due course' (no specific window). governing_law: SS8 Malaysia (not a recognised mature data-protection regime in the policy list)."
+    }
+  }
+}
