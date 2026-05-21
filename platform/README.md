@@ -70,53 +70,75 @@ curl -sS https://api.anthropic.com/v1/memory_stores \
 
 Save the returned id → `export MEMORY_STORE_ID=...`
 
+## Data model: what's mounted vs. what's in the event
+
+A deliberate split, mirroring a real ops pipeline:
+
+- **Static reference** (deploys, runbooks, contracts, compliance-policy, metrics)
+  is uploaded via the Files API and **mounted read-only** under `/mnt/data/`. It
+  rarely changes, so it isn't re-sent on every trigger.
+- **The firing issue(s)** ride in the **triggering event** (`user.message`) —
+  exactly as an alert/webhook delivers a work item.
+- **Memory** (`/mnt/memory/`) is the attached store, `read_write`.
+
+`trigger.py` enforces this: it mounts only the reference subtrees and embeds the
+issue(s) in the event.
+
 ## 4. Demo it (no Slack, no repo)
 
-The agent degrades gracefully: with no GitHub/Slack MCP configured it just
-analyzes the data and streams its findings back. `trigger.py` embeds a dataset
-inline in the kickoff message, so nothing external needs connecting.
+The agent degrades gracefully: with no GitHub/Slack MCP configured it analyzes
+the data and streams its findings back — nothing external needs connecting.
 
 ```bash
 export ANTHROPIC_API_KEY=... AGENT_ID=... ENVIRONMENT_ID=... MEMORY_STORE_ID=...
-python platform/trigger.py --task all          # uses the demo/ sandbox
-python platform/trigger.py --task all --data-dir .   # full synthetic repo
+python platform/trigger.py --task triage                 # demo issues, in the event
+python platform/trigger.py --task all                    # triage + compliance
+python platform/trigger.py --task triage --issue alert.json   # a single webhook payload
 ```
 
-You'll see the agent's triage table, compliance findings, and the exact file
-changes it *would* commit — printed straight from the session stream.
+You'll see the triage table, compliance findings, and the exact changes it
+*would* commit — streamed from the session.
 
-### Raw `curl` trigger (what a webhook would call)
+### Webhook shape
 
-Start a session, send a message, stream the result — no SDK needed:
-
-```bash
-SESSION=$(curl -sS https://api.anthropic.com/v1/sessions \
-  -H "x-api-key: $ANTHROPIC_API_KEY" -H "anthropic-version: 2023-06-01" \
-  -H "anthropic-beta: managed-agents-2026-04-01" -H "content-type: application/json" \
-  -d "{\"agent\":\"$AGENT_ID\",\"environment_id\":\"$ENVIRONMENT_ID\",\"title\":\"ops-demo\"}" | jq -r .id)
-
-curl -sS "https://api.anthropic.com/v1/sessions/$SESSION/events" \
-  -H "x-api-key: $ANTHROPIC_API_KEY" -H "anthropic-version: 2023-06-01" \
-  -H "anthropic-beta: managed-agents-2026-04-01" -H "content-type: application/json" \
-  -d '{"events":[{"type":"user.message","content":[{"type":"text","text":"Run the triage task. === FILE: issues/DEMO-1.json ===\n{...paste an issue...}"}]}]}'
-
-curl -sS -N "https://api.anthropic.com/v1/sessions/$SESSION/stream" \
-  -H "x-api-key: $ANTHROPIC_API_KEY" -H "anthropic-version: 2023-06-01" \
-  -H "anthropic-beta: managed-agents-2026-04-01" -H "Accept: text/event-stream"
-```
-
-(`trigger.py` is the convenient version — it builds the payload from files for you.)
+A webhook handler does three calls: create a session (mounting reference +
+memory via `resources[]`), `POST /sessions/{id}/events` with the alert JSON as
+the `user.message`, then stream `/sessions/{id}/stream`. `trigger.py --issue
+<payload>` is the convenient version; point your handler at the same logic.
 
 ## 5. Schedule or webhook
 
 `trigger.py` is the entrypoint either way:
 
-- **Schedule:** run it from cron / a GitHub Actions `schedule:` / an EventBridge
-  timer, e.g. `*/15 * * * *  python /app/platform/trigger.py --task all`.
-- **Webhook:** call it from a tiny HTTP handler (FastAPI/Lambda) on `POST`.
+- **Schedule:** cron / GitHub Actions `schedule:` / EventBridge, e.g.
+  `*/15 * * * *  python /app/platform/trigger.py --task compliance`.
+- **Webhook:** call it from a tiny HTTP handler (FastAPI/Lambda) on `POST`,
+  passing the alert payload via `--issue`.
 
 The schedule/webhook lives in *your* infra; it only needs `ANTHROPIC_API_KEY`,
-`AGENT_ID`, and `ENVIRONMENT_ID`.
+`AGENT_ID`, `ENVIRONMENT_ID` (and `MEMORY_STORE_ID`).
+
+## Keeping memory fresh
+
+Cross-run memory is **live, not periodic**: the store is mounted `read_write`,
+so the agent reads `incidents/`+`overrides/` at the start of every run and writes
+new learnings at the end — the next issue automatically sees the latest store.
+No daily job is required for the agent to have up-to-date learnings.
+
+A scheduled job adds **curation**, not freshness:
+
+```bash
+# daily: merge duplicate fingerprints, prune stale entries, tidy overrides/
+0 3 * * *  python /app/platform/trigger.py --task maintain
+```
+
+Two more levers:
+- **Human overrides, immediately:** push a correction into the store anytime via
+  the memories API — `POST /v1/memory_stores/$MEMORY_STORE_ID/memories` with
+  `path=/overrides/<issue>.md`. The next run reads it as trusted memory.
+- **Native consolidation:** the platform's **Dreams** feature performs offline
+  memory consolidation; enable it on the store instead of (or alongside) the
+  `maintain` cron.
 
 ## 6. Going live (PR + Slack)
 
