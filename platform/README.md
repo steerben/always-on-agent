@@ -17,6 +17,18 @@ declaratively — there's no container to build.
 | **Session** | One run of the agent over one task. |
 | **Trigger** | There is no built-in cron/webhook. *You* start a session and send the kickoff message — from a scheduler or an HTTP handler. `trigger.py` does this. |
 
+## Quick path (two commands)
+
+```bash
+export ANTHROPIC_API_KEY=...
+eval "$(./platform/setup.sh)"          # creates the agent + environment, sets the IDs
+python platform/trigger.py --task all  # runs the agent over the demo/ sandbox
+```
+
+`setup.sh` creates the agent from `agent.yaml` and a cloud environment, then
+prints `export AGENT_ID=... / ENVIRONMENT_ID=...` (progress goes to stderr, so
+`eval` captures just the IDs). The manual steps below do the same by hand.
+
 ## 1. Create the agent (once)
 
 Pick one:
