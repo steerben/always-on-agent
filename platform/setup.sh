@@ -45,9 +45,20 @@ environment="$(curl -sS --fail-with-body "$API/v1/environments" \
 ENVIRONMENT_ID="$(jq -er '.id' <<<"$environment")"
 log "  environment id: $ENVIRONMENT_ID"
 
+log "Creating memory store (cross-run learning) ..."
+store="$(curl -sS --fail-with-body "$API/v1/memory_stores" \
+  -H "x-api-key: $ANTHROPIC_API_KEY" \
+  -H "anthropic-version: 2023-06-01" \
+  -H "anthropic-beta: $BETA" \
+  -H "content-type: application/json" \
+  -d '{"name":"ops-agent-memory","description":"Cross-run ops memory: recurring incident fingerprints (incidents/) and human triage overrides (overrides/). Consult before triaging; update after each run."}')"
+MEMORY_STORE_ID="$(jq -er '.id' <<<"$store")"
+log "  memory store id: $MEMORY_STORE_ID"
+
 log ""
 log "Done. Run:  python platform/trigger.py --task all"
 
 # stdout: the export lines (so `eval \"\$(./platform/setup.sh)\"` works).
 echo "export AGENT_ID=$AGENT_ID"
 echo "export ENVIRONMENT_ID=$ENVIRONMENT_ID"
+echo "export MEMORY_STORE_ID=$MEMORY_STORE_ID"

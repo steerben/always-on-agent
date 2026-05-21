@@ -10,11 +10,16 @@ For a no-integration demo it embeds a dataset (default: the demo/ sandbox)
 inline in the kickoff message, so the agent needs neither a connected repo nor
 Slack — it streams its triage + compliance findings straight back.
 
+Cross-run learning uses a native Managed Agents memory store: when MEMORY_STORE_ID
+is set, it is attached to the session (read_write) and mounted in the agent's
+container, so the agent reads/writes its own memory across runs.
+
 Prereqs:
     pip install anthropic            # a version with Managed Agents beta support
     export ANTHROPIC_API_KEY=...
     export AGENT_ID=...              # from creating platform/agent.yaml
     export ENVIRONMENT_ID=...        # from creating an environment (see README)
+    export MEMORY_STORE_ID=...       # optional; enables cross-run memory
 
 Usage:
     python platform/trigger.py --task all
@@ -32,16 +37,6 @@ from anthropic import Anthropic
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_DATA_DIR = REPO_ROOT / "demo"
-
-# Reuse the self-hosted variant's pure, stdlib-only memory logic. On this
-# platform the calibration is injected into the kickoff message (here) rather
-# than the system prompt, since Anthropic owns the agent loop.
-sys.path.insert(0, str(REPO_ROOT))
-try:
-    from agent.memory import prior_context_prompt
-except ImportError:  # agent package not importable -> run without memory
-    def prior_context_prompt(**_kwargs: object) -> str:
-        return ""
 
 
 def build_data_block(data_dir: Path) -> str:
@@ -62,13 +57,7 @@ def kickoff_text(task: str, data_dir: Path, note: str | None) -> str:
     )
     if note:
         header += f"\n\nTrigger context: {note}"
-
-    memory = prior_context_prompt()  # reads state/ at the repo root; "" if none
-    parts = [header]
-    if memory:
-        parts.append(memory)
-    parts.append(build_data_block(data_dir))
-    return "\n\n".join(parts)
+    return f"{header}\n\n{build_data_block(data_dir)}"
 
 
 def main() -> None:
@@ -85,12 +74,33 @@ def main() -> None:
 
     client = Anthropic()  # reads ANTHROPIC_API_KEY; sets the beta header itself
 
+    # Attach the native memory store (if configured) so the agent carries
+    # incident fingerprints + human overrides across runs. read_write lets it
+    # update memory at the end of the run; mounted under /mnt/memory/.
+    resources = []
+    memory_store_id = os.environ.get("MEMORY_STORE_ID")
+    if memory_store_id:
+        resources.append(
+            {
+                "type": "memory_store",
+                "memory_store_id": memory_store_id,
+                "access": "read_write",
+                "instructions": (
+                    "Your long-term ops memory. Read incidents/ and overrides/ "
+                    "before triaging; record incident fingerprints and human "
+                    "overrides after the run."
+                ),
+            }
+        )
+
     session = client.beta.sessions.create(
         agent=agent_id,
         environment_id=environment_id,
         title=f"ops-{args.task}",
+        resources=resources,
     )
-    print(f"[session {session.id}] streaming...\n", file=sys.stderr)
+    mem_note = memory_store_id or "(none)"
+    print(f"[session {session.id}] memory={mem_note} streaming...\n", file=sys.stderr)
 
     with client.beta.sessions.events.stream(session.id) as stream:
         client.beta.sessions.events.send(

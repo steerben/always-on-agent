@@ -25,9 +25,11 @@ eval "$(./platform/setup.sh)"          # creates the agent + environment, sets t
 python platform/trigger.py --task all  # runs the agent over the demo/ sandbox
 ```
 
-`setup.sh` creates the agent from `agent.yaml` and a cloud environment, then
-prints `export AGENT_ID=... / ENVIRONMENT_ID=...` (progress goes to stderr, so
-`eval` captures just the IDs). The manual steps below do the same by hand.
+`setup.sh` creates the agent from `agent.yaml`, a cloud environment, and a
+memory store, then prints `export AGENT_ID=... / ENVIRONMENT_ID=... /
+MEMORY_STORE_ID=...` (progress goes to stderr, so `eval` captures just the IDs).
+`trigger.py` attaches the memory store to each session so the agent learns
+across runs. The manual steps below do the same by hand.
 
 ## 1. Create the agent (once)
 
@@ -53,14 +55,29 @@ curl -sS https://api.anthropic.com/v1/environments \
 
 Save the returned id → `export ENVIRONMENT_ID=...`
 
-## 3. Demo it (no Slack, no repo)
+## 3. Create a memory store (once)
+
+Gives the agent cross-run memory. `trigger.py` attaches it to each session.
+
+```bash
+curl -sS https://api.anthropic.com/v1/memory_stores \
+  -H "x-api-key: $ANTHROPIC_API_KEY" \
+  -H "anthropic-version: 2023-06-01" \
+  -H "anthropic-beta: managed-agents-2026-04-01" \
+  -H "content-type: application/json" \
+  -d '{"name":"ops-agent-memory","description":"Recurring incident fingerprints and human triage overrides."}'
+```
+
+Save the returned id → `export MEMORY_STORE_ID=...`
+
+## 4. Demo it (no Slack, no repo)
 
 The agent degrades gracefully: with no GitHub/Slack MCP configured it just
 analyzes the data and streams its findings back. `trigger.py` embeds a dataset
 inline in the kickoff message, so nothing external needs connecting.
 
 ```bash
-export ANTHROPIC_API_KEY=... AGENT_ID=... ENVIRONMENT_ID=...
+export ANTHROPIC_API_KEY=... AGENT_ID=... ENVIRONMENT_ID=... MEMORY_STORE_ID=...
 python platform/trigger.py --task all          # uses the demo/ sandbox
 python platform/trigger.py --task all --data-dir .   # full synthetic repo
 ```
@@ -90,7 +107,7 @@ curl -sS -N "https://api.anthropic.com/v1/sessions/$SESSION/stream" \
 
 (`trigger.py` is the convenient version — it builds the payload from files for you.)
 
-## 4. Schedule or webhook
+## 5. Schedule or webhook
 
 `trigger.py` is the entrypoint either way:
 
@@ -101,7 +118,7 @@ curl -sS -N "https://api.anthropic.com/v1/sessions/$SESSION/stream" \
 The schedule/webhook lives in *your* infra; it only needs `ANTHROPIC_API_KEY`,
 `AGENT_ID`, and `ENVIRONMENT_ID`.
 
-## 5. Going live (PR + Slack)
+## 6. Going live (PR + Slack)
 
 Uncomment the `mcp_servers` + `mcp_toolset` block in `agent.yaml`, point it at
 your GitHub and Slack MCP servers, and update the agent. The system prompt
@@ -118,7 +135,7 @@ the trigger, or already provided natively:
 |---|---|
 | **Escalation gate** (`observability.escalation_decision`) | Encoded in the agent system prompt: P0/P1 + confirmed → page; P0/P1 + suspected → PR-and-warn; else PR-only. |
 | **Action tools** (`action_tools`: metrics check, rollback proposal) | Folded into the system prompt — the agent uses its built-in `read`/`write` to check `metrics/recent.json` and to write `rollbacks/*.json` (never executed). No custom tool needed; the `_impl` fns remain reusable if you later want `type: custom` tools. |
-| **Cross-run memory** (`memory.prior_context_prompt`) | `trigger.py` reuses that exact module and injects the calibration block into the *kickoff message*. State lives in `state/` at the repo root. The platform's native **Memory stores** are the eventual upgrade. |
+| **Cross-run memory** (`memory.prior_context_prompt`) | **Native Memory store.** `setup.sh` creates a store; `trigger.py` attaches it to each session (`read_write`), mounted at `/mnt/memory/`. The agent reads `incidents/` + `overrides/` before triaging and updates them after — owning its own memory, with versioned audit history. |
 | **Observability** (`RunRecorder`, `/runs` dashboard) | **Native.** Every session's events, tool calls, tokens, and cost are recorded server-side — see Console → Analytics (Logs / Usage / Cost). No reimplementation. |
 | **Interactive Slack** (`slack_interactive`) | The signing/parse/decision helpers are reusable, but the inbound callback endpoint stays in *your* infra (the platform has no inbound webhook). See the steering pattern below. |
 
