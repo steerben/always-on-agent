@@ -107,3 +107,35 @@ Uncomment the `mcp_servers` + `mcp_toolset` block in `agent.yaml`, point it at
 your GitHub and Slack MCP servers, and update the agent. The system prompt
 already instructs the agent to open a PR (never merge) and post to Slack *when
 those tools are present* — no prompt changes needed.
+
+## Feature parity with the self-hosted `agent/` variant
+
+The self-hosted variant added five capabilities. Because Anthropic owns the
+agent loop here, each one is either folded into the declarative agent, moved to
+the trigger, or already provided natively:
+
+| Capability (`agent/…`) | Here |
+|---|---|
+| **Escalation gate** (`observability.escalation_decision`) | Encoded in the agent system prompt: P0/P1 + confirmed → page; P0/P1 + suspected → PR-and-warn; else PR-only. |
+| **Action tools** (`action_tools`: metrics check, rollback proposal) | Folded into the system prompt — the agent uses its built-in `read`/`write` to check `metrics/recent.json` and to write `rollbacks/*.json` (never executed). No custom tool needed; the `_impl` fns remain reusable if you later want `type: custom` tools. |
+| **Cross-run memory** (`memory.prior_context_prompt`) | `trigger.py` reuses that exact module and injects the calibration block into the *kickoff message*. State lives in `state/` at the repo root. The platform's native **Memory stores** are the eventual upgrade. |
+| **Observability** (`RunRecorder`, `/runs` dashboard) | **Native.** Every session's events, tool calls, tokens, and cost are recorded server-side — see Console → Analytics (Logs / Usage / Cost). No reimplementation. |
+| **Interactive Slack** (`slack_interactive`) | The signing/parse/decision helpers are reusable, but the inbound callback endpoint stays in *your* infra (the platform has no inbound webhook). See the steering pattern below. |
+
+### Human-in-the-loop via session steering
+
+Managed Agents supports steering a session mid-run by sending more `user.message`
+events. That maps cleanly to the Slack approve/dismiss flow:
+
+1. The agent posts the Block Kit message (built with
+   `agent.slack_interactive.build_findings_message`) via the Slack MCP, then goes
+   idle awaiting a decision.
+2. Your `/slack/actions` handler (same infra as the trigger) verifies the
+   signature (`verify_slack_signature`), parses it (`parse_action_payload`), and
+   maps it to a decision (`decide_from_action`).
+3. Instead of mutating local state, it sends that decision back into the **same
+   session** as a `user.message` event — so the agent itself carries out the
+   approved action (page, keep PR, or dismiss).
+
+This keeps the human gate without any loop you have to host — only the thin
+signature-verifying handler.

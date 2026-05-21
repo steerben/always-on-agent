@@ -33,6 +33,16 @@ from anthropic import Anthropic
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_DATA_DIR = REPO_ROOT / "demo"
 
+# Reuse the self-hosted variant's pure, stdlib-only memory logic. On this
+# platform the calibration is injected into the kickoff message (here) rather
+# than the system prompt, since Anthropic owns the agent loop.
+sys.path.insert(0, str(REPO_ROOT))
+try:
+    from agent.memory import prior_context_prompt
+except ImportError:  # agent package not importable -> run without memory
+    def prior_context_prompt(**_kwargs: object) -> str:
+        return ""
+
 
 def build_data_block(data_dir: Path) -> str:
     """Embed every file under data_dir as `=== FILE: <relpath> ===` sections."""
@@ -52,7 +62,13 @@ def kickoff_text(task: str, data_dir: Path, note: str | None) -> str:
     )
     if note:
         header += f"\n\nTrigger context: {note}"
-    return f"{header}\n\n{build_data_block(data_dir)}"
+
+    memory = prior_context_prompt()  # reads state/ at the repo root; "" if none
+    parts = [header]
+    if memory:
+        parts.append(memory)
+    parts.append(build_data_block(data_dir))
+    return "\n\n".join(parts)
 
 
 def main() -> None:
