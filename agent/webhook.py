@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import BackgroundTasks, FastAPI, Header, HTTPException
+from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Response
 from pydantic import BaseModel
 
 from .config import settings
@@ -27,6 +27,9 @@ app = FastAPI(title="Always-On Ops Agent")
 class TriggerRequest(BaseModel):
     task: str = "all"
     note: str | None = None
+    # wait=true runs the agent inline and returns its findings in the response
+    # (great for demos). wait=false returns 202 and runs in the background.
+    wait: bool = False
 
 
 async def _run_logged(task: str, note: str | None) -> None:
@@ -42,10 +45,11 @@ def healthz() -> dict:
     return {"status": "ok", "dry_run": settings.dry_run}
 
 
-@app.post("/trigger", status_code=202)
+@app.post("/trigger")
 async def trigger(
     req: TriggerRequest,
     background: BackgroundTasks,
+    response: Response,
     x_agent_secret: str = Header(default=""),
 ) -> dict:
     if x_agent_secret != settings.webhook_secret:
@@ -53,5 +57,10 @@ async def trigger(
     if req.task not in VALID_TASKS:
         raise HTTPException(status_code=400, detail=f"task must be one of {sorted(VALID_TASKS)}")
 
+    if req.wait:
+        summary = await run_agent(task=req.task, note=req.note)
+        return {"task": req.task, "dry_run": settings.dry_run, "summary": summary}
+
     background.add_task(_run_logged, req.task, req.note)
+    response.status_code = 202
     return {"accepted": True, "task": req.task}

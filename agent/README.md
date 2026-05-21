@@ -49,8 +49,42 @@ curl -X POST localhost:8080/trigger \
   -d '{"task": "all", "note": "manual run"}'
 ```
 
-`/trigger` returns `202` immediately and runs the agent in the background;
-`/healthz` is a liveness probe.
+`/trigger` runs the agent in the background and returns `202`. For a demo, send
+`"wait": true` to run inline and get the agent's findings back in the response:
+
+```bash
+curl -s -X POST localhost:8080/trigger \
+  -H "X-Agent-Secret: $WEBHOOK_SECRET" \
+  -H "Content-Type: application/json" \
+  -d '{"task": "all", "wait": true}' | jq -r .summary
+```
+
+`/healthz` is a liveness probe (also reports `dry_run`).
+
+## Demo without Slack or a real repo
+
+With `DRY_RUN=true` (the default) the agent needs no Slack and no GitHub: it reads
+local data, writes its proposed changes to the working tree, and *logs* the PR and
+Slack actions it would take. Two ways to show it off:
+
+**1. Self-contained sandbox (shows the actual file changes).** A tiny dataset
+lives in `demo/` (one real incident that correlates to a deploy, one feature
+request that must NOT be paged, one contract that breaks 2 policy rules):
+
+```bash
+./scripts/demo.sh
+```
+
+This points `REPO_DIR` at `demo/`, runs the agent, and prints the diff it
+produced (severities + triage notes written into the issues, plus a new
+`COMPLIANCE-*.json` finding). Re-runnable — it resets the sandbox each time.
+
+**2. Live endpoint (what you'd show on the platform).** Run the webhook server
+(or deploy the container) with `DRY_RUN=true` and `curl` `/trigger` with
+`"wait": true` (above). The response body contains the agent's full triage +
+compliance findings — no external integrations required. Point `REPO_DIR` at
+`demo/` (or leave it on the bundled synthetic data) depending on which dataset
+you want it to analyze.
 
 ## Going live
 

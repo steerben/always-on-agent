@@ -1,0 +1,12 @@
+{
+  "id": "DEMO-101",
+  "title": "Checkout failing with NullPointerException since this morning",
+  "status": "open",
+  "severity": null,
+  "labels": ["customer-impact"],
+  "assignee": null,
+  "opened_at": "2026-05-21T09:20:00Z",
+  "reporter": "monitoring-alerts@demo.example",
+  "body": "p99 latency on /checkout jumped from 600ms to 7s and error rate is up sharply since ~09:05 UTC. Sampled stack trace:\n\njava.lang.NullPointerException\n  at com.demo.cart.CartService.applyPromo(CartService.java:88)\n  at com.demo.cart.CheckoutController.checkout(CheckoutController.java:54)\n\nAll regions affected. Looks like every customer with an older cart is hitting it.",
+  "comments": []
+}

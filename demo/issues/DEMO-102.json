@@ -1,0 +1,12 @@
+{
+  "id": "DEMO-102",
+  "title": "Add CSV export to the admin dashboard",
+  "status": "open",
+  "severity": null,
+  "labels": [],
+  "assignee": null,
+  "opened_at": "2026-05-19T11:00:00Z",
+  "reporter": "product@demo.example",
+  "body": "It would be great if admins could export the user list from the dashboard as a CSV. Proposing a button on the Users page that streams a CSV download. Not urgent, targeting next sprint.",
+  "comments": []
+}

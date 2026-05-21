@@ -1,0 +1,26 @@
+{
+  "deploys": [
+    {
+      "service": "cart-service",
+      "version": "v2.3.0",
+      "deployed_at": "2026-05-21T09:02:00Z",
+      "deployed_by": "dev-bot@demo.example",
+      "commit": "b71e0aa",
+      "summary": "Add promo-code support at checkout",
+      "files_changed": ["CartService.java", "CheckoutController.java"],
+      "rollback_available": true,
+      "last_known_good": "v2.2.9"
+    },
+    {
+      "service": "frontend",
+      "version": "v8.1.2",
+      "deployed_at": "2026-05-20T15:40:00Z",
+      "deployed_by": "ci-bot@demo.example",
+      "commit": "c33aa01",
+      "summary": "Minor: footer copy update",
+      "files_changed": ["src/footer.tsx"],
+      "rollback_available": true,
+      "last_known_good": "v8.1.1"
+    }
+  ]
+}
