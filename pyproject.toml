@@ -10,6 +10,9 @@ dependencies = [
     "httpx>=0.27",
     "pydantic>=2.7",
     "pydantic-settings>=2.3",
+    # Managed Agents trigger (platform/trigger.py). Needs a version with the
+    # client.beta.agents / client.beta.sessions surface.
+    "anthropic>=0.69",
 ]
 
 [project.scripts]
