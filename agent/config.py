@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     github_repo: str = ""
     pr_base_branch: str = "main"
     slack_webhook_url: str = ""
+    # Slack request-signing secret, used to verify interactive button callbacks
+    # on POST /slack/actions. Empty disables verification (endpoint rejects all).
+    slack_signing_secret: str = ""
 
     webhook_secret: str = "change-me"
 

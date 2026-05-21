@@ -118,10 +118,12 @@ async def post_to_slack(args: dict) -> dict:
 
 def build_tool_server():
     """In-process MCP server exposing the side-effect tools."""
+    from .action_tools import ACTION_TOOLS
+
     return create_sdk_mcp_server(
         name="ops",
         version="0.1.0",
-        tools=[open_pull_request, post_to_slack],
+        tools=[open_pull_request, post_to_slack, *ACTION_TOOLS],
     )
 
 

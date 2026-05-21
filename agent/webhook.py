@@ -12,11 +12,19 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Response
+from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request, Response
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 from .config import settings
 from .core import VALID_TASKS, run_agent
+from .observability import load_runs, render_dashboard_html
+from .slack_interactive import (
+    ack_response,
+    decide_from_action,
+    parse_action_payload,
+    verify_slack_signature,
+)
 
 logger = logging.getLogger("ops-agent.webhook")
 logging.basicConfig(level=logging.INFO)
@@ -64,3 +72,46 @@ async def trigger(
     background.add_task(_run_logged, req.task, req.note)
     response.status_code = 202
     return {"accepted": True, "task": req.task}
+
+
+@app.get("/runs.json")
+def runs_json() -> list[dict]:
+    """Structured history of past agent runs (newest first)."""
+    return load_runs()
+
+
+@app.get("/runs", response_class=HTMLResponse)
+def runs_dashboard() -> str:
+    """Human-readable dashboard of past agent runs."""
+    return render_dashboard_html(load_runs())
+
+
+@app.post("/slack/actions")
+async def slack_actions(
+    request: Request,
+    x_slack_signature: str = Header(default=""),
+    x_slack_request_timestamp: str = Header(default=""),
+) -> dict:
+    """Handle interactive Slack button clicks (approve / PR-only / dismiss).
+
+    Slack signs the raw request body, so we must verify before parsing.
+    """
+    body = await request.body()
+    if not verify_slack_signature(
+        signing_secret=settings.slack_signing_secret,
+        timestamp=x_slack_request_timestamp,
+        signature=x_slack_signature,
+        body=body,
+    ):
+        raise HTTPException(status_code=401, detail="invalid Slack signature")
+
+    parsed = parse_action_payload(body.decode())
+    decision = decide_from_action(parsed)
+    logger.info(
+        "Slack action %s by %s (token=%s) -> %s",
+        parsed.get("action_id"),
+        parsed.get("user"),
+        parsed.get("action_token"),
+        decision.get("decision"),
+    )
+    return ack_response(decision)
