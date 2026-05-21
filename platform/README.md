@@ -21,8 +21,8 @@ declaratively — there's no container to build.
 
 ```bash
 export ANTHROPIC_API_KEY=...
-eval "$(./platform/setup.sh)"          # creates the agent + environment, sets the IDs
-python platform/trigger.py --task all  # runs the agent over the demo/ sandbox
+eval "$(./platform/setup.sh)"      # creates agent + environment + memory store, sets IDs
+python platform/trigger.py         # sends one demo issue; the agent classifies + handles it
 ```
 
 `setup.sh` creates the agent from `agent.yaml`, a cloud environment, and a
@@ -70,50 +70,53 @@ curl -sS https://api.anthropic.com/v1/memory_stores \
 
 Save the returned id → `export MEMORY_STORE_ID=...`
 
-## Data model: what's mounted vs. what's in the event
+## Data model: classify-and-route
 
-A deliberate split, mirroring a real ops pipeline:
+Each trigger delivers **exactly one work item**, and the agent (Sonnet) starts
+by **classifying** it, then runs the matching procedure:
 
-- **Static reference** (deploys, runbooks, contracts, compliance-policy, metrics)
-  is uploaded via the Files API and **mounted read-only** under `/mnt/data/`. It
-  rarely changes, so it isn't re-sent on every trigger.
-- **The firing issue(s)** ride in the **triggering event** (`user.message`) —
-  exactly as an alert/webhook delivers a work item.
+| Item type | Procedure |
+|---|---|
+| `incident` | correlate with deploys + runbooks (+ metrics), assign severity, escalation gate, propose rollback |
+| `feature_request` | label, route to backlog, do **not** page |
+| `contract` | check against the compliance policy, emit findings |
+
+What's mounted vs. delivered:
+
+- **Static reference** — `deploys`, `runbooks`, `compliance-policy.md`, `metrics`
+  — is uploaded via the Files API and **mounted read-only** under `/mnt/data/`.
+- **The work item** — an issue **or a contract** — rides in the **triggering
+  event** (`user.message`). (Contracts and issues are *not* mounted; only the
+  stable compliance *policy* is.)
 - **Memory** (`/mnt/memory/`) is the attached store, `read_write`.
-
-`trigger.py` enforces this: it mounts only the reference subtrees and embeds the
-issue(s) in the event.
 
 ## 4. Demo it (no Slack, no repo)
 
-The agent degrades gracefully: with no GitHub/Slack MCP configured it analyzes
-the data and streams its findings back — nothing external needs connecting.
+One item per trigger. The agent classifies and handles it, streaming findings
+back — nothing external needs connecting.
 
 ```bash
 export ANTHROPIC_API_KEY=... AGENT_ID=... ENVIRONMENT_ID=... MEMORY_STORE_ID=...
-python platform/trigger.py --task triage                 # demo issues, in the event
-python platform/trigger.py --task all                    # triage + compliance
-python platform/trigger.py --task triage --issue alert.json   # a single webhook payload
+python platform/trigger.py                                       # default: one issue (incident)
+python platform/trigger.py --item demo/issues/DEMO-102.json      # a feature request
+python platform/trigger.py --item demo/contracts/contoso-cloud.md # a contract
 ```
-
-You'll see the triage table, compliance findings, and the exact changes it
-*would* commit — streamed from the session.
 
 ### Webhook shape
 
 A webhook handler does three calls: create a session (mounting reference +
-memory via `resources[]`), `POST /sessions/{id}/events` with the alert JSON as
-the `user.message`, then stream `/sessions/{id}/stream`. `trigger.py --issue
+memory via `resources[]`), `POST /sessions/{id}/events` with the work item as
+the `user.message`, then stream `/sessions/{id}/stream`. `trigger.py --item
 <payload>` is the convenient version; point your handler at the same logic.
 
 ## 5. Schedule or webhook
 
 `trigger.py` is the entrypoint either way:
 
-- **Schedule:** cron / GitHub Actions `schedule:` / EventBridge, e.g.
-  `*/15 * * * *  python /app/platform/trigger.py --task compliance`.
+- **Schedule:** cron / GitHub Actions `schedule:` / EventBridge — e.g. a nightly
+  contract sweep that fires one `--item <contract>` per contract.
 - **Webhook:** call it from a tiny HTTP handler (FastAPI/Lambda) on `POST`,
-  passing the alert payload via `--issue`.
+  passing the firing item (issue or contract) via `--item`.
 
 The schedule/webhook lives in *your* infra; it only needs `ANTHROPIC_API_KEY`,
 `AGENT_ID`, `ENVIRONMENT_ID` (and `MEMORY_STORE_ID`).
